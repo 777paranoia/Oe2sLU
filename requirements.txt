@@ -1,0 +1,17 @@
+# ---- REQUIRED ----------------------------------------------------------
+# The only hard runtime dependency. numpy must stay < 2.0 because the demucs
+# model checkpoints are pickled against numpy 1.x (numpy.core.multiarray).
+numpy>=1.21,<2.0
+
+# ---- OPTIONAL (the app runs without all of these; each adds one feature) ----
+# Every one of these is imported defensively; if it's missing, only that
+# feature turns off. They are bundled into the standalone .app so end users
+# install nothing.
+sounddevice>=0.4.6     # audio preview in the editor
+Pillow>=9.0            # scaled steak background + nicer icon handling
+tkinterdnd2>=0.3.0     # drag-and-drop files onto the lists
+# tkextrafont  # optional, NON-macOS only; needs a C toolchain/cmake to build.
+#              On macOS bundled fonts load via CoreText (no dependency).
+demucs>=4.0.0          # stem-split pre-pass (large: pulls in torch)
+soundfile>=0.12        # robust audio read (wav/flac/aiff/ogg/mp3)
+imageio-ffmpeg>=0.4    # ships a static ffmpeg for converting any input to WAV
