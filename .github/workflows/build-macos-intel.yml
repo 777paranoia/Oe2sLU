@@ -1,0 +1,110 @@
+name: Build macOS Intel app
+
+# Builds a standalone Intel macOS .app for Oe2sLU on a GitHub-hosted Intel Mac.
+# PyInstaller cannot cross-compile macOS apps from Linux/Windows, and Apple
+# Silicon runners produce arm64 binaries, so this workflow pins the Intel runner
+# label and verifies the final app executable is x86_64 before packaging.
+
+on:
+  workflow_dispatch:        # manual "Run workflow" button
+  push:
+    tags:
+      - 'v*'                # also build on version tags, e.g. v0.2.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Confirm Intel runner
+        run: |
+          uname -a
+          test "$(uname -m)" = "x86_64"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+
+      - name: Verify Tkinter
+        run: |
+          python -c "import platform, tkinter; print(platform.machine()); print('tkinter', tkinter.TkVersion, 'OK')"
+
+      - name: Install build + runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          # Required: PyInstaller (build tool) + numpy (only hard runtime dep).
+          python -m pip install pyinstaller "numpy<2"
+
+          # Optional niceties -- install each separately so one failure cannot
+          # block the rest.
+          for pkg in sounddevice Pillow tkinterdnd2 soundfile imageio-ffmpeg; do
+            python -m pip install "$pkg" || echo "skipped $pkg (app still works)"
+          done
+
+          # Stem-splitting: demucs pulls in torch and is large. Keep it
+          # non-fatal so the regular app can still ship if PyTorch wheels move.
+          python -m pip install demucs || echo "demucs/torch skipped; stem split off"
+
+          # Keep numpy < 2.0 in case demucs/torch dragged in 2.x.
+          python -m pip install "numpy<2"
+
+      - name: Bundle a static Intel ffmpeg
+        run: |
+          mkdir -p bin
+          # Drop any ffmpeg copied in from another machine/architecture.
+          rm -f bin/ffmpeg bin/ffmpeg.exe
+
+          FF="$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          cp "$FF" bin/ffmpeg
+          chmod +x bin/ffmpeg
+          file bin/ffmpeg
+          lipo -archs bin/ffmpeg | grep -qw x86_64
+
+      - name: Build with PyInstaller
+        run: |
+          rm -rf build dist
+          pyinstaller --noconfirm e2s_autoslice_gui.spec
+
+      - name: Verify app bundle
+        run: |
+          APP="dist/Oe2sLU.app"
+          EXE="$APP/Contents/MacOS/Oe2sLU"
+
+          test -d "$APP"
+          test -x "$EXE"
+          du -sh "$APP"
+          file "$EXE"
+          lipo -archs "$EXE" | grep -qw x86_64
+
+      - name: Zip the app bundle
+        run: |
+          APP="dist/Oe2sLU.app"
+          ZIP="Oe2sLU-macos-x86_64.zip"
+
+          xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+          rm -f "$ZIP"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: Oe2sLU-macos-x86_64
+          path: Oe2sLU-macos-x86_64.zip
+          retention-days: 30
+
+      # On a version-tag build, also attach the zip to the GitHub Release.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Oe2sLU-macos-x86_64.zip
