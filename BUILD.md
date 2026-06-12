@@ -8,6 +8,9 @@ optional features. End users install nothing — they double-click.
   ([jump to Windows](#building-for-windows)).
 - **Linux** → `dist/Oe2sLU/Oe2sLU`, built in the cloud via GitHub Actions
   ([jump to Linux](#building-for-linux)).
+- **FreeBSD** → `dist/Oe2sLU/Oe2sLU`, built in a FreeBSD VM on a GitHub Actions
+  Ubuntu host ([jump to FreeBSD](#building-for-freebsd)). Lean build — no
+  stem-splitting (no FreeBSD PyTorch).
 
 > **PyInstaller cannot cross-compile.** A macOS `.app` can only be built on a
 > Mac, and a Windows `.exe` can only be built on Windows. There is no way to
@@ -212,6 +215,62 @@ pip install pyinstaller "numpy<2" sounddevice Pillow tkinterdnd2 soundfile image
 pip install "numpy<2"
 mkdir -p bin && cp "$(python -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())')" bin/ffmpeg
 pyinstaller --noconfirm e2s_autoslice_gui_linux.spec
+```
+
+Result: `dist/Oe2sLU/Oe2sLU`.
+
+## Building for FreeBSD
+
+FreeBSD is the odd one out: GitHub has **no FreeBSD runner**, so the build runs
+inside a **FreeBSD VM** (QEMU) on an Ubuntu host via
+[`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm). The repo is
+synced into the VM, PyInstaller runs there, and `dist/` is synced back out for
+the artifact upload.
+
+**This is a lean build.** PyTorch has no FreeBSD wheels, so **stem-splitting is
+not available** on FreeBSD — `e2s_autoslice_gui_freebsd.spec` deliberately
+excludes `torch`/`demucs`. Slicing, BPM detection, format conversion, chop, and
+the embedded editor all work normally.
+
+The pieces:
+
+- `e2s_autoslice_gui_freebsd.spec` — lean one-folder ELF spec (no icon, no
+  torch/demucs; collects only Pillow/tkinterdnd2/soundfile/sounddevice).
+- `.github/workflows/build-freebsd.yml` — the CI job. `pkg`-installs Python,
+  Tk, numpy, libsndfile, portaudio and ffmpeg; builds in a `--system-site-
+  packages` venv (so it sees the pkg-provided numpy and the `_tkinter` C module
+  pip can't supply); tars `dist/Oe2sLU/`; uploads the artifact.
+
+### Run it
+
+- **Actions** tab → **Build FreeBSD app** → **Run workflow**. (Also on a `v*`
+  tag, attaching the tarball to the Release.) Expect it to be slower than the
+  other jobs — it's booting and provisioning a VM.
+- Download **Oe2sLU-freebsd-x64**, then `tar -xzf Oe2sLU-freebsd-x64.tar.gz`
+  and run `./Oe2sLU/Oe2sLU`.
+
+### Notes / caveats
+
+- **No bundled ffmpeg.** For m4a/aac/wma input, users need a system ffmpeg
+  (`pkg install ffmpeg`); WAV/FLAC/AIFF/OGG/MP3 work via libsndfile. The code
+  already falls back to `shutil.which("ffmpeg")` at runtime.
+- **PyInstaller on FreeBSD is less battle-tested** — the bootloader compiles
+  from source on install. If a run fails at the PyInstaller install step, that's
+  the usual culprit; the FreeBSD `pkg` may also offer a prebuilt
+  `py311-pyinstaller` to use instead.
+- The VM is pinned to FreeBSD `14.2`; bump `release:` in the workflow to target
+  a different version.
+- If you don't actually need FreeBSD, this is the most fragile of the four
+  targets — fine to skip it.
+
+### Local FreeBSD build (optional)
+
+```
+pkg install -y python311 py311-pip py311-tkinter py311-numpy libsndfile portaudio ffmpeg
+python3.11 -m venv --system-site-packages .build-venv
+. .build-venv/bin/activate
+pip install pyinstaller Pillow tkinterdnd2 soundfile sounddevice
+pyinstaller --noconfirm e2s_autoslice_gui_freebsd.spec
 ```
 
 Result: `dist/Oe2sLU/Oe2sLU`.

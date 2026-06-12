@@ -1,0 +1,64 @@
+name: Build FreeBSD app
+
+# Builds a standalone FreeBSD distribution of Oe2sLU. GitHub has no native
+# FreeBSD runner, so the build runs inside a FreeBSD VM (via QEMU) on an Ubuntu
+# host using vmactions/freebsd-vm. The repo is synced into the VM, the build
+# runs there, and dist/ is synced back to the host for artifact upload.
+#
+# This is a LEAN build: PyTorch has no FreeBSD wheels, so stem-splitting is not
+# included. Everything else works. See e2s_autoslice_gui_freebsd.spec.
+
+on:
+  workflow_dispatch:        # manual "Run workflow" button
+  push:
+    tags:
+      - 'v*'                # also build on version tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Build inside a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          # System packages: Python, Tk, numpy, and the audio libs that the
+          # optional extras link against (libsndfile -> soundfile, portaudio ->
+          # sounddevice). ffmpeg is for runtime conversion convenience.
+          prepare: |
+            pkg install -y python311 py311-pip py311-tkinter py311-numpy libsndfile portaudio ffmpeg
+          run: |
+            set -e
+            # --system-site-packages so the venv can see pkg-installed numpy
+            # and the _tkinter C module (which pip cannot provide).
+            python3.11 -m venv --system-site-packages /tmp/venv
+            . /tmp/venv/bin/activate
+            python -m pip install --upgrade pip
+            python -m pip install pyinstaller
+            # Lightweight optional extras; each is non-fatal if it won't build.
+            for p in Pillow tkinterdnd2 soundfile sounddevice; do
+              python -m pip install "$p" || echo "skipped $p (app still works)"
+            done
+            rm -rf build dist
+            pyinstaller --noconfirm e2s_autoslice_gui_freebsd.spec
+
+      - name: Tar the distribution
+        run: tar -C dist -czf Oe2sLU-freebsd-x64.tar.gz Oe2sLU
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: Oe2sLU-freebsd-x64
+          path: Oe2sLU-freebsd-x64.tar.gz
+          retention-days: 30
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Oe2sLU-freebsd-x64.tar.gz
