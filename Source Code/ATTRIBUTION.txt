@@ -1,0 +1,83 @@
+# Attribution and Code Provenance
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This project is a fork/continuation of **Oe2sSLE** with additional loop-slicing tools. Unless otherwise noted, project code is licensed under the GNU General Public License v3.0 or later.
+
+**Repository note:** replace the bundled `LICENSE` file with the GPL-3.0-or-later text if it still contains GPL v2.
+
+## Upstream: Oe2sSLE
+
+**Project:** Open e2sSample.all Library Editor  
+**Author:** Jonathan Taquet  
+**Copyright:** Copyright (C) 2015–2017 Jonathan Taquet  
+**License:** GPL-3.0-or-later  
+**Source:** https://github.com/JonathanTaquet/Oe2sSLE
+
+### Used unmodified
+
+- `e2s_sample_all.py`
+- `e2s_sample_trim.py`
+- `wav_tools.py`
+- `utils.py`
+- `version.py`
+- `VerticalScrolledFrame.py`
+- `audio.py`
+- `RIFF/__init__.py`
+- `RIFF/smpl.py`
+- `RIFF/cue.py`
+- `GUI/res.py`
+- `GUI/widgets.py`
+- `GUI/tooltip.py`
+- `GUI/stereo_to_mono.py`
+- `GUI/wait_dialog.py`
+- `GUI/about_dialog.py`
+- `GUI/import_options.py`
+- `GUI/export_options.py`
+- `GUI/exchange_sample_dialog.py`
+- `images/*.gif`
+- `linux-*.spec`
+- `osx-*.spec`
+- `win-*.spec`
+
+### Modified in this fork
+
+- `Oe2sSLE_GUI.py` — changed `SampleAllEditor` from `tk.Tk` to an embeddable `tk.Frame`; updated `__main__` hosting.
+- `e2s_sample_import.py` — fixed the `--mono` import path by converting through WAV helpers instead of passing raw bytes directly.
+
+## Original code in this fork
+
+**Copyright:** Copyright (C) 2026 777PARANOIA  
+**License:** GPL-3.0-or-later
+
+- `slice_engine.py`
+- `e2s_autoslice.py`
+- `e2s_autoslice_gui.py`
+- `slice_export.py`
+- `e2s_chop.py`
+- `stem_split.py`
+- `build_mac_app.command`
+- `e2s_autoslice_gui.command`
+- `e2s_autoslice_gui.spec`
+- `images/AppIcon.icns`
+- `images/AppIcon.ico`
+- `images/AppIcon.png`
+
+## Project assets
+
+- `slicer.png` — source artwork for the app icon.
+- `steak.png` — GUI background image.
+
+## Third-party dependencies
+
+These are not part of this repository unless separately vendored. They are installed at build/runtime and remain under their own licenses.
+
+- `numpy` — BSD
+- `sounddevice` — MIT
+- `Pillow` — MIT-CMU
+- `tkinterdnd2` — MIT; includes `tkdnd` under a BSD-style license
+- `demucs` — MIT; optional stem splitting
+- `torch` / `torchaudio` — BSD; pulled in by `demucs`
+- `PyInstaller` — GPL with exception; build tool only
+
+When distributing binaries, include the corresponding source code and required third-party license notices.

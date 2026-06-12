@@ -1,0 +1,77 @@
+name: Build Windows app
+
+# Builds a standalone Windows distribution of Oe2sLU on a Windows runner.
+# PyInstaller cannot cross-compile, so this is the supported way to produce a
+# .exe without owning a Windows machine: push (or click "Run workflow") and
+# download the zipped result from the run's Artifacts section.
+
+on:
+  workflow_dispatch:        # manual "Run workflow" button
+  push:
+    tags:
+      - 'v*'                # also build on version tags, e.g. v0.2.0
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12 (bundles Tk 8.6)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build + runtime dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # Required: PyInstaller (build tool) + numpy (only hard runtime dep).
+          python -m pip install pyinstaller "numpy<2"
+          # Optional niceties -- install each separately so one failure can't
+          # block the rest.
+          foreach ($pkg in @('sounddevice','Pillow','tkinterdnd2','soundfile','imageio-ffmpeg')) {
+            python -m pip install $pkg; if ($LASTEXITCODE -ne 0) { Write-Host "skipped $pkg (app still works)" }
+          }
+          # Stem-splitting: CPU PyTorch + demucs (large). Non-fatal on failure.
+          python -m pip install demucs; if ($LASTEXITCODE -ne 0) { Write-Host "demucs/torch skipped; stem split off" }
+          # Keep numpy < 2.0 in case demucs/torch dragged in 2.x.
+          python -m pip install "numpy<2"
+
+      - name: Bundle a static ffmpeg.exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          # Drop any non-Windows ffmpeg that may be committed in bin/.
+          if (Test-Path bin/ffmpeg) { Remove-Item bin/ffmpeg -Force }
+          $ff = python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          Copy-Item $ff bin/ffmpeg.exe -Force
+          Write-Host "bundled ffmpeg.exe from $ff"
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          if (Test-Path build) { Remove-Item build -Recurse -Force }
+          if (Test-Path dist)  { Remove-Item dist  -Recurse -Force }
+          pyinstaller --noconfirm e2s_autoslice_gui_win.spec
+
+      - name: Zip the distribution
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/Oe2sLU/* -DestinationPath Oe2sLU-windows-x64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oe2sLU-windows-x64
+          path: Oe2sLU-windows-x64.zip
+          retention-days: 30
+
+      # On a version-tag build, also attach the zip to the GitHub Release.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Oe2sLU-windows-x64.zip

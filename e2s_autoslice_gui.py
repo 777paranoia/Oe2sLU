@@ -45,8 +45,23 @@ import e2s_sample_all as e2s,e2s_autoslice,e2s_chop
 from VerticalScrolledFrame import VerticalScrolledFrame
 try:from PIL import Image,ImageTk;_HAVE_PIL=_G
 except Exception:_HAVE_PIL=_J
+<<<<<<< HEAD
+_HAVE_DND=_J;_BASE=tk.Tk;DND_FILES=_D
+# Importing tkinterdnd2 succeeds even when its bundled tkdnd library is ABI-
+# incompatible with the bundled Tcl/Tk ("interpreter uses an incompatible stubs
+# mechanism"); the failure only surfaces when tkdnd is actually loaded. So we
+# probe it on a throwaway root here. If it loads, drag-and-drop is available; if
+# not, we fall back to a plain Tk so the app still launches (DnD just off).
+try:
+	from tkinterdnd2 import TkinterDnD,DND_FILES
+	_probe=tk.Tk();_probe.withdraw()
+	try:TkinterDnD._require(_probe);_HAVE_DND=_G;_BASE=TkinterDnD.Tk
+	finally:_probe.destroy()
+except Exception:_HAVE_DND=_J;_BASE=tk.Tk;DND_FILES=_D
+=======
 try:from tkinterdnd2 import TkinterDnD,DND_FILES;_HAVE_DND=_G;_BASE=TkinterDnD.Tk
 except Exception:_HAVE_DND=_J;_BASE=tk.Tk
+>>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
 CATEGORIES=list(e2s.esli_str_to_OSC_cat)
 BEATS=list(e2s.esli_beat)
 MODES='transient','hybrid','grid'
@@ -333,5 +348,15 @@ class AutoSliceGUI(_BASE):
 		A.destroy()
 MANUAL=[('h1',_U),(_C,'Batch auto-slicer for Korg electribe sampler (e2s) loops. Point it at WAV files or folders, choose how to slice, and it writes sliced samples ready for the device. All processing is offline; nothing is uploaded.'),(_F,'Quick start'),(_C,'1. Add files or a folder under Inputs (or drag them onto the list).\n2. Pick an Output folder.\n3. Leave Mode on transient and click Slice.\nThe log shows what happened and the equivalent command line.'),(_F,'Modes'),(_C,'transient (default) - place slices on detected hits/beats (spectral-flux onset detection), with a one-16th minimum spacing. Best for most loops.\ngrid - cut the loop into equal divisions (the Steps value).\nhybrid - an equal grid where each step snaps to a nearby hit if one is close; always one slice per step. Use when you want a strict step grid aligned to the groove.'),(_F,'Output format'),(_C,'wav (default) - one WAV per input carrying the Korg slice metadata plus standard smpl/cue chunks. Drag onto the device.\ne2sSample.all - a single bank file holding every processed sample, assigned to slots starting at First slot.\nOutput is capped at the e2s memory limit (26,214,396 bytes); anything that would exceed it is skipped with a note in the log. ("esli" is Korg\'s name for the embedded slice metadata.)'),(_F,_P),(_C,"Any text here is added to the end of every output file name, before .wav. E.g. '_140' turns loop.wav into loop_140.wav."),(_F,'Steps & BPM'),(_C,"Steps is the number of grid divisions/slices (max 64). Leave blank to auto-pick (bars x 16).\nBPM is used to infer bar count. Leave blank to auto-detect: first from the filename if it contains something like '140bpm', otherwise from the loop length assuming a whole number of 4/4 bars. If detection guesses wrong, type the BPM here to force it."),(_F,'Beat & Category'),(_C,"Beat sets the device's step resolution (16, 32, triplet variants). Category is the sample category shown on the electribe (Loop, Kick, Snare, etc.)."),(_F,'Tolerance (hybrid only)'),(_C,'How far a grid point may move to land on a detected hit, as a fraction of one step. 0 = never snap (pure grid). Around 0.35 is a good default.'),(_F,_f),(_C,'Onset detection for transient and hybrid modes, on the electribe firmware 1-15 scale (Sample Edit). 1 keeps only the strongest hits; 15 catches the quietest. Default 8. In transient mode the slice count is still capped to Steps.'),(_F,_g),(_C,"Optional pre-pass: each input is separated into stems (drums/bass/vocals/other) with demucs, then the ticked stems are sliced individually. All four are selected by default. The same Mode, Tolerance and Sensitivity are applied to every stem - there is no per-stem control. Outputs are named '<track>__<stem>.wav'; raw stems are kept in a '_stems' folder. Requires demucs (bundled in the standalone app); first run downloads the model."),(_F,_Y),(_C,'Tools > Chop sliced WAVs (or the Chop tool button) splits an already-sliced WAV into one file per slice, reading the cue/esli markers this app writes. Optional click-free fade applies a short fade in/out to each exported slice so there are no edge clicks.'),(_F,'Options'),(_C,"Set loop points - loop the whole sample on the device (off = one-shot).\nDeactivate silent steps - silent steps left inactive in the step map.\nPer-slice metrics - compute each slice's peak/attack for the metadata.\nForce mono - center-mix stereo inputs to mono.\nVerbose log - print a per-file summary."),(_F,'Log'),(_C,'Copy log / Save log / Clear log manage the output pane. The first line of each run is the exact command-line equivalent.')]
 def _quote(a):return'"%s"'%a if' 'in a else a
+<<<<<<< HEAD
+def main():
+	try:os.chdir(os.path.dirname(os.path.abspath(__file__)))
+	except Exception:pass
+	A=AutoSliceGUI();A.mainloop()
+if __name__=='__main__':
+	import multiprocessing;multiprocessing.freeze_support()
+	main()
+=======
 def main():os.chdir(os.path.dirname(os.path.abspath(__file__)));A=AutoSliceGUI();A.mainloop()
 if __name__=='__main__':main()
+>>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
