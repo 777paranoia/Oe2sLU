@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Tk + audio system libraries
         run: |
@@ -26,24 +26,88 @@ jobs:
           sudo apt-get install -y python3-tk tk libportaudio2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Install build + runtime dependencies
         run: |
           python -m pip install --upgrade pip
+
           # Required: PyInstaller (build tool) + numpy (only hard runtime dep).
           python -m pip install pyinstaller "numpy<2"
+
           # Optional niceties -- install each separately so one failure can't
           # block the rest.
           for pkg in sounddevice Pillow tkinterdnd2 soundfile imageio-ffmpeg; do
             python -m pip install "$pkg" || echo "skipped $pkg (app still works)"
           done
-          # Stem-splitting: CPU PyTorch + demucs (large). Non-fatal on failure.
-          python -m pip install demucs || echo "demucs/torch skipped; stem split off"
+
+          # Stem-splitting: install CPU-ONLY torch first from PyTorch's CPU
+          # wheel index. Do this before installing demucs so Linux never pulls
+          # the default CUDA-enabled torch stack from PyPI.
+          if python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu; then
+            # Install demucs without dependency resolution so pip cannot later
+            # replace the CPU torch wheel with the CUDA build.
+            python -m pip install --no-deps demucs || echo "demucs skipped; stem split off"
+
+            # Demucs' normal runtime dependencies, installed after CPU torch is
+            # already present. If one optional helper fails, keep the base app
+            # buildable instead of failing the whole Linux artifact.
+            for pkg in dora-search einops julius lameenc openunmix PyYAML tqdm retrying submitit treetable; do
+              python -m pip install "$pkg" || echo "skipped $pkg (stem split may be disabled)"
+            done
+          else
+            echo "torch CPU skipped; stem split off"
+          fi
+
           # Keep numpy < 2.0 in case demucs/torch dragged in 2.x.
           python -m pip install "numpy<2"
+
+          # Belt-and-suspenders cleanup: if any nvidia-* wheel still made it
+          # into the environment, remove it before PyInstaller scans packages.
+          python - <<'PY'
+          import importlib.metadata as md
+          import subprocess
+          import sys
+
+          pkgs = sorted({
+              dist.metadata.get('Name', '')
+              for dist in md.distributions()
+              if dist.metadata.get('Name', '').lower().startswith('nvidia-')
+          })
+
+          if pkgs:
+              print('Removing CUDA wheels:', ', '.join(pkgs))
+              subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', '-y', *pkgs])
+          else:
+              print('No NVIDIA CUDA pip packages installed.')
+          PY
+
+          # Fail loudly if CUDA torch or NVIDIA wheels are still present. The
+          # app only does CPU inference, so these should never be in the bundle.
+          python - <<'PY'
+          import importlib.metadata as md
+          import sys
+
+          bad = sorted({
+              dist.metadata.get('Name', '')
+              for dist in md.distributions()
+              if dist.metadata.get('Name', '').lower().startswith('nvidia-')
+          })
+          if bad:
+              raise SystemExit('Refusing to build with CUDA wheels installed: ' + ', '.join(bad))
+
+          try:
+              import torch
+          except Exception as exc:
+              print('torch not importable; stem split will be unavailable:', exc)
+          else:
+              print('torch:', torch.__version__)
+              print('torch.version.cuda:', torch.version.cuda)
+              if torch.version.cuda is not None:
+                  raise SystemExit('Refusing to build: CUDA-enabled torch is installed.')
+          PY
 
       - name: Bundle a static ffmpeg
         run: |
@@ -60,12 +124,35 @@ jobs:
           rm -rf build dist
           pyinstaller --noconfirm e2s_autoslice_gui_linux.spec
 
+      - name: Check bundle size and CUDA blobs
+        run: |
+          du -sh dist/Oe2sLU
+          hits=$(find dist/Oe2sLU \( \
+            -path '*/nvidia/*' -o \
+            -iname 'libcuda*' -o \
+            -iname 'libcudart*' -o \
+            -iname 'libcublas*' -o \
+            -iname 'libcudnn*' -o \
+            -iname 'libcufft*' -o \
+            -iname 'libcurand*' -o \
+            -iname 'libcusolver*' -o \
+            -iname 'libcusparse*' -o \
+            -iname 'libnccl*' -o \
+            -iname 'libnvrtc*' -o \
+            -iname 'libnvtools*' \
+          \) -print)
+          if [ -n "$hits" ]; then
+            echo "Refusing to package CUDA/NVIDIA blobs:"
+            echo "$hits"
+            exit 1
+          fi
+
       - name: Tar the distribution
         run: |
           tar -C dist -czf Oe2sLU-linux-x64.tar.gz Oe2sLU
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Oe2sLU-linux-x64
           path: Oe2sLU-linux-x64.tar.gz

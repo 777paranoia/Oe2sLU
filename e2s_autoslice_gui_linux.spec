@@ -3,7 +3,7 @@
 # PyInstaller spec for the e2s auto-slice GUI -- LINUX build.
 # Produces a one-folder distribution: dist/Oe2sLU/Oe2sLU (an ELF binary) plus
 # its support files. One-folder (not one-file) is deliberate: the bundle pulls
-# in torch/demucs and is ~1 GB; a one-file binary would unpack that to /tmp on
+# in torch/demucs and is large; a one-file binary would unpack that to /tmp on
 # every launch (slow). The folder launches instantly.
 #
 # Build (on Linux, with Tk available):
@@ -17,6 +17,38 @@
 # .desktop-file concern), so the icon= argument is omitted.
 
 block_cipher = None
+
+# CUDA/NVIDIA packages should never be bundled. The GitHub workflow installs
+# CPU-only torch, but these filters prevent accidental CUDA blobs from being
+# collected if the build environment gets polluted.
+_CUDA_NEEDLES = (
+    '/nvidia/', '\\nvidia\\',
+    'nvidia_', 'nvidia-',
+    'libcuda', 'libcudart', 'libcublas', 'libcudnn', 'libcufft',
+    'libcurand', 'libcusolver', 'libcusparse', 'libnccl', 'libnvrtc',
+    'libnvtools', 'nvrtc-builtins',
+)
+
+
+def _is_cuda_blob(path):
+    text = str(path).lower().replace('\\', '/')
+    return any(needle in text for needle in _CUDA_NEEDLES)
+
+
+def _drop_cuda_blobs(toc):
+    cleaned = []
+    dropped = []
+    for item in toc:
+        if len(item) >= 2 and (_is_cuda_blob(item[0]) or _is_cuda_blob(item[1])):
+            dropped.append(item)
+        else:
+            cleaned.append(item)
+    if dropped:
+        print('Dropped CUDA/NVIDIA bundle entries:')
+        for item in dropped:
+            print('  ', item)
+    return cleaned
+
 
 # Local sibling modules are reached through normal imports; numpy is handled by
 # PyInstaller's bundled hooks. List extras here if a build reports a missing
@@ -32,12 +64,14 @@ hiddenimports = ['e2s_autoslice', 'slice_engine', 'e2s_sample_all',
                  'GUI.stereo_to_mono', 'GUI.wait_dialog', 'GUI.about_dialog',
                  'GUI.import_options', 'GUI.export_options',
                  'GUI.exchange_sample_dialog']
+
 # Bundle the icon (used by the app's own window), steak background, and the
 # editor's image resources.
 datas = [('steak.png', '.'),
          ('images', 'images'),
          ('fonts', 'fonts')]
-# bundle a static ffmpeg (for m4a/aac/wma conversion) if one was placed in bin/
+
+# Bundle a static ffmpeg (for m4a/aac/wma conversion) if one was placed in bin/.
 import os as _os
 if _os.path.isdir('bin'):
     datas += [('bin', 'bin')]
@@ -52,11 +86,29 @@ for _pkg in ('demucs', 'torch', 'torchaudio', 'julius', 'openunmix',
              'ffmpeg', 'PIL', 'tkinterdnd2'):
     try:
         _d, _b, _h = collect_all(_pkg)
-        datas += _d
-        binaries += _b
+        datas += _drop_cuda_blobs(_d)
+        binaries += _drop_cuda_blobs(_b)
         hiddenimports += _h
     except Exception:
         pass
+
+# If CUDA packages were installed anyway, keep PyInstaller from traversing them.
+excludes = [
+    'nvidia',
+    'nvidia.cuda_runtime',
+    'nvidia.cublas',
+    'nvidia.cudnn',
+    'nvidia.cufft',
+    'nvidia.curand',
+    'nvidia.cusolver',
+    'nvidia.cusparse',
+    'nvidia.nccl',
+    'nvidia.nvjitlink',
+    'nvidia.nvtx',
+    'triton',
+    'torch.distributed',
+    'torch.testing',
+]
 
 a = Analysis(
     ['e2s_autoslice_gui.py'],
@@ -66,10 +118,16 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Remove CUDA/NVIDIA binary/data entries added by PyInstaller hooks during
+# Analysis. This is intentionally binary-focused; torch.cuda Python modules are
+# small and may exist even in CPU-only torch wheels.
+a.binaries = _drop_cuda_blobs(a.binaries)
+a.datas = _drop_cuda_blobs(a.datas)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
