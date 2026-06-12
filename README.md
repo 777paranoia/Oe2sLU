@@ -8,7 +8,8 @@ Loop Utility also includes other tools like pre-process BPM detection, Demucs st
 
 Additionally, the Oe2sSLE-0.2.2 code bundled into the GUI is patched and updated for Mac compatibility; of which was previously unavailable. 
 
-This is an ongoing development and is currently only available for Mac OSX. 
+This is an ongoing development <s>and is currently only available for Mac OSX</s>. <br>
+<i><b>UPDATE [2026.06.10.0153]:</b> we now have packages for Windows, Linux, and FreeBSD available in the releases</i>
 
 **<b>Please report any bugs you encounter to "Issues"</b>**
 
