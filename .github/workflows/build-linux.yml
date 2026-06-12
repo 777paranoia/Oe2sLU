@@ -1,0 +1,79 @@
+name: Build Linux app
+
+# Builds a standalone Linux distribution of Oe2sLU on an Ubuntu runner.
+# PyInstaller cannot cross-compile, so this is the supported way to produce a
+# Linux build without a Linux machine: push (or click "Run workflow") and
+# download the tarball from the run's Artifacts section.
+
+on:
+  workflow_dispatch:        # manual "Run workflow" button
+  push:
+    tags:
+      - 'v*'                # also build on version tags, e.g. v0.2.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Tk + audio system libraries
+        run: |
+          sudo apt-get update
+          # Tk for the GUI; portaudio for sounddevice preview; ffmpeg deps.
+          sudo apt-get install -y python3-tk tk libportaudio2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build + runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Required: PyInstaller (build tool) + numpy (only hard runtime dep).
+          python -m pip install pyinstaller "numpy<2"
+          # Optional niceties -- install each separately so one failure can't
+          # block the rest.
+          for pkg in sounddevice Pillow tkinterdnd2 soundfile imageio-ffmpeg; do
+            python -m pip install "$pkg" || echo "skipped $pkg (app still works)"
+          done
+          # Stem-splitting: CPU PyTorch + demucs (large). Non-fatal on failure.
+          python -m pip install demucs || echo "demucs/torch skipped; stem split off"
+          # Keep numpy < 2.0 in case demucs/torch dragged in 2.x.
+          python -m pip install "numpy<2"
+
+      - name: Bundle a static ffmpeg
+        run: |
+          mkdir -p bin
+          # Drop any non-Linux ffmpeg that may be committed in bin/.
+          rm -f bin/ffmpeg bin/ffmpeg.exe
+          FF=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          cp "$FF" bin/ffmpeg
+          chmod +x bin/ffmpeg
+          echo "bundled ffmpeg from $FF"
+
+      - name: Build with PyInstaller
+        run: |
+          rm -rf build dist
+          pyinstaller --noconfirm e2s_autoslice_gui_linux.spec
+
+      - name: Tar the distribution
+        run: |
+          tar -C dist -czf Oe2sLU-linux-x64.tar.gz Oe2sLU
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oe2sLU-linux-x64
+          path: Oe2sLU-linux-x64.tar.gz
+          retention-days: 30
+
+      # On a version-tag build, also attach the tarball to the GitHub Release.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Oe2sLU-linux-x64.tar.gz

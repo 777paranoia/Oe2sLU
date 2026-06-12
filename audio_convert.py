@@ -25,12 +25,8 @@ def _resource(rel):
 
 def ffmpeg_path():
     """Locate an ffmpeg: bundled bin/ first, then PATH, then common installs."""
-<<<<<<< HEAD
     for c in (_resource("bin/ffmpeg.exe"), _resource("ffmpeg.exe"),
               _resource("bin/ffmpeg"), _resource("ffmpeg")):
-=======
-    for c in (_resource("bin/ffmpeg"), _resource("ffmpeg")):
->>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
         if os.path.isfile(c):
             try:
                 os.chmod(c, os.stat(c).st_mode | stat.S_IEXEC | stat.S_IXGRP

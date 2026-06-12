@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Building & shipping Open Electribe2 Sampler Loop Utility
 
 This produces a self-contained app that bundles Python, Tk, numpy, and all
@@ -7,15 +6,14 @@ optional features. End users install nothing — they double-click.
 - **macOS** → `Oe2sLU.app` (see below).
 - **Windows** → `dist\Oe2sLU\Oe2sLU.exe`, built in the cloud via GitHub Actions
   ([jump to Windows](#building-for-windows)).
+- **Linux** → `dist/Oe2sLU/Oe2sLU`, built in the cloud via GitHub Actions
+  ([jump to Linux](#building-for-linux)).
 
 > **PyInstaller cannot cross-compile.** A macOS `.app` can only be built on a
 > Mac, and a Windows `.exe` can only be built on Windows. There is no way to
 > emit a Windows binary from a Mac (or vice versa) — hence the CI job below.
 
 ## macOS build
-=======
-# Building & shipping Open Electribe2 Sampler Loop Utility (macOS)
->>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
 
 This produces a self-contained `Oe2sLU.app` that bundles Python, Tk,
 numpy, and all optional features. End users install nothing — they double-click.
@@ -54,7 +52,6 @@ Notes:
   `build_mac_app.command` before building.
 - To bundle the Gohu font, drop the `.ttf` into `fonts/` before building.
 
-<<<<<<< HEAD
 ## Drag-and-drop: build with Tk 8.6 (important)
 
 The `tkinterdnd2` drag-and-drop library ships a `tkdnd` binary built for **Tcl/Tk
@@ -73,8 +70,6 @@ build with a Tk-8.6 Python:
 
 This is the only known launch-crash cause and it's now non-fatal regardless.
 
-=======
->>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
 ## First launch / Gatekeeper
 
 The app is **unsigned**, so the first open on any Mac shows a warning. Either:
@@ -104,7 +99,6 @@ xcrun notarytool submit upload.zip --apple-id <id> --team-id <team> --password <
 xcrun stapler staple dist/Oe2sLU.app
 ```
 
-<<<<<<< HEAD
 ## Building for Windows
 
 Windows builds run on a GitHub Actions **windows-latest** runner — no Windows
@@ -170,8 +164,58 @@ pyinstaller --noconfirm e2s_autoslice_gui_win.spec
 
 Result: `dist\Oe2sLU\Oe2sLU.exe`.
 
-=======
->>>>>>> 5467480c348ea3682a89ab828645a82945f28e85
+## Building for Linux
+
+Linux builds run on a GitHub Actions **ubuntu-latest** runner — no Linux
+machine required. The pieces:
+
+- `e2s_autoslice_gui_linux.spec` — the Linux PyInstaller spec. Same module/data
+  list as the others, but emits a **one-folder** ELF distribution and omits the
+  icon (Linux executables carry no embedded icon — that's a `.desktop`-file
+  concern, not a binary one).
+- `.github/workflows/build-linux.yml` — the CI job: installs Tk + PortAudio via
+  apt, then PyInstaller + `numpy<2` + the optional extras + demucs/torch (CPU),
+  fetches a static `ffmpeg` via `imageio-ffmpeg`, runs the spec, tars
+  `dist/Oe2sLU/`, and uploads it as a build artifact.
+
+### Run it
+
+- In the repo on GitHub → **Actions** tab → **Build Linux app** →
+  **Run workflow**. (Also runs on a `v*` tag, and on a tag attaches the tarball
+  to the Release.)
+- Download **Oe2sLU-linux-x64** from the run's **Artifacts**, then:
+  ```
+  tar -xzf Oe2sLU-linux-x64.tar.gz
+  ./Oe2sLU/Oe2sLU
+  ```
+
+### Notes
+
+- The runner builds against the **glibc** of `ubuntu-latest`. The binary runs on
+  that glibc or newer; very old distros may be too old. Build on the oldest
+  Ubuntu you want to support (pin `runs-on: ubuntu-22.04`) if that matters.
+- Runtime needs the GUI/audio shared libs present on the user's machine: most
+  desktops already have Tk; audio preview needs `libportaudio2`
+  (`sudo apt-get install libportaudio2`). Slicing/BPM/conversion work without it.
+- No `ffmpeg.exe`/extension issue here — `ffmpeg_path()` already checks
+  `bin/ffmpeg`, which is exactly the Linux name the workflow drops in.
+- To ship a lean build without stem-splitting, drop the `demucs` install line in
+  the workflow and remove `'demucs'`/`'torch'`/`'torchaudio'` from the
+  `collect_all` loop in `e2s_autoslice_gui_linux.spec`.
+
+### Local Linux build (optional)
+
+```
+sudo apt-get install -y python3-tk tk libportaudio2
+python3 -m venv .build-venv && source .build-venv/bin/activate
+pip install pyinstaller "numpy<2" sounddevice Pillow tkinterdnd2 soundfile imageio-ffmpeg demucs
+pip install "numpy<2"
+mkdir -p bin && cp "$(python -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())')" bin/ffmpeg
+pyinstaller --noconfirm e2s_autoslice_gui_linux.spec
+```
+
+Result: `dist/Oe2sLU/Oe2sLU`.
+
 ## License
 
 GPL-3.0-or-later (continuation of Oe2sSLE by Jonathan Taquet). Replace the
