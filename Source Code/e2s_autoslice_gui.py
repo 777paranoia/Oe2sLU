@@ -88,7 +88,7 @@ class _StreamRedirect:
 		if s:A.q.put(s)
 	def flush(A):0
 class AutoSliceGUI(_BASE):
-	def __init__(A):super().__init__();A.title(_U);A.minsize(660,640);A.log_queue=queue.Queue();A.worker=_D;A._manual_win=_D;A._chop_win=_D;A._action_buttons=[];A._bg_img=_D;A._bg_raw=_D;A.cfg=A._load_config();A.last_in_dir=A.cfg.get(_V,'');A.last_out_dir=A.cfg.get(_W,'');A._apply_theme();A._set_icon();A._build_menu();A._build_background();A._build_widgets();A._restore_state();A.protocol('WM_DELETE_WINDOW',A._on_close);A.after(100,A._drain_log)
+	def __init__(A):super().__init__();A.title(_U);A.minsize(660,640);A.log_queue=queue.Queue();A.worker=_D;A._manual_win=_D;A._chop_win=_D;A._bpm_win=_D;A._bpm_overrides={};A._action_buttons=[];A._bg_img=_D;A._bg_raw=_D;A.cfg=A._load_config();A.last_in_dir=A.cfg.get(_V,'');A.last_out_dir=A.cfg.get(_W,'');A._apply_theme();A._set_icon();A._build_menu();A._build_background();A._build_widgets();A._restore_state();A.protocol('WM_DELETE_WINDOW',A._on_close);A.after(100,A._drain_log)
 	def _apply_theme(B):
 		global FONT_FAMILY
 		try:_load_fonts(B)
@@ -151,34 +151,104 @@ class AutoSliceGUI(_BASE):
 		for(F,G)in MANUAL:A.insert(_B,G+'\n',F)
 		A.configure(state=_L)
 	def _detect_bpm(A):
-		import tkinter as tk,threading
-		D=list(A.inputs_list.get(0,_B))
-		if not D:messagebox.showwarning('Missing input','Add at least one WAV file or folder.');return
-		argv=list(D)+['--beat',A.beat_var.get()]
-		b=A.bpm_var.get().strip()
-		if b:argv+=['--bpm',b]
+		import tkinter as tk,threading,os as _os
+		files_in=list(A.inputs_list.get(0,_B))
+		if not files_in:messagebox.showwarning('Missing input','Add at least one WAV file or folder.');return
+		argv=list(files_in)+['--beat',A.beat_var.get()]
 		s=A.steps_var.get().strip()
 		if s:argv+=['--steps',s]
 		if A.mono_var.get():argv+=['--mono']
-		if getattr(A,'_bpm_win',None)is not None and A._bpm_win.winfo_exists():A._bpm_win.destroy()
-		W=tk.Toplevel(A);A._bpm_win=W;W.title('Detected BPM');W.minsize(460,320)
-		F=ttk.Frame(W,padding=8);F.pack(fill='both',expand=True);F.rowconfigure(0,weight=1);F.columnconfigure(0,weight=1)
-		T=tk.Text(F,wrap='none',font=(FONT_FAMILY,12));T.grid(row=0,column=0,sticky=_K)
-		S=ttk.Scrollbar(F,command=T.yview);S.grid(row=0,column=1,sticky='ns');T.configure(yscrollcommand=S.set)
-		ttk.Button(F,text='Close',command=W.destroy).grid(row=1,column=0,columnspan=2,sticky=_H,pady=(8,0))
-		T.insert('end','Analyzing %d input(s)…\n'%len(D));T.configure(state=_L)
-		def fill(res):
+		if getattr(A,'_bpm_win',_D)is not None and A._bpm_win.winfo_exists():A._bpm_win.destroy()
+		if not hasattr(A,'_bpm_overrides'):A._bpm_overrides={}
+		try:
+			import audio as _au;HAVE_AUDIO=_au.sd is not None
+		except Exception:HAVE_AUDIO=_J
+		W=tk.Toplevel(A);A._bpm_win=W;W.title('Set BPM per track');W.minsize(600,360)
+		O=ttk.Frame(W,padding=8);O.pack(fill='both',expand=True);O.rowconfigure(1,weight=1);O.columnconfigure(0,weight=1)
+		ttk.Label(O,text='Use BPM starts at the detected tempo. Edit it, or use x2 / /2 to fix half/double-time, then Apply. Clear a box to keep the detected value.',wraplength=580,justify='left').grid(row=0,column=0,columnspan=2,sticky=_A,pady=(0,6))
+		CV=tk.Canvas(O,highlightthickness=0);SB=ttk.Scrollbar(O,orient='vertical',command=CV.yview);BODY=ttk.Frame(CV)
+		BODY.bind('<Configure>',lambda e:CV.configure(scrollregion=CV.bbox(_M)))
+		CV.create_window((0,0),window=BODY,anchor='nw');CV.configure(yscrollcommand=SB.set)
+		CV.grid(row=1,column=0,sticky=_K);SB.grid(row=1,column=1,sticky='ns')
+		def wheel(e):
+			d=0
+			if getattr(e,'delta',0):d=-1 if e.delta>0 else 1
+			elif getattr(e,'num',0)==4:d=-1
+			elif getattr(e,'num',0)==5:d=1
+			CV.yview_scroll(d,'units');return'break'
+		for _ev in('<MouseWheel>','<Button-4>','<Button-5>'):CV.bind(_ev,wheel);BODY.bind(_ev,wheel)
+		ST=tk.StringVar(value='Analyzing %d input(s)...'%len(files_in));ttk.Label(O,textvariable=ST).grid(row=2,column=0,columnspan=2,sticky=_A,pady=(6,0))
+		BT=ttk.Frame(O);BT.grid(row=3,column=0,columnspan=2,sticky=_E,pady=(8,0))
+		A._bpm_rows={}
+		def fmt(v):
+			try:return'%d'%round(float(v))
+			except Exception:return''
+		def cur(stem):
+			R=A._bpm_rows.get(stem)
+			if not R:return _D
+			t=R['var'].get().strip()
+			if t:
+				try:return float(t)
+				except ValueError:return _D
+			return R['detected']
+		def mul(stem,f):
+			b=cur(stem)
+			if b:A._bpm_rows[stem]['var'].set(fmt(b*f))
+		def play(path):
+			if not HAVE_AUDIO:ST.set('Audio preview unavailable (sounddevice not installed).');return
+			def go():
+				try:
+					import audio
+					from e2s_sample_import import from_wav,ImportOptions
+					smp,_C2,_C3=from_wav(path,ImportOptions());snd=audio.Sound(bytes(smp.get_data().rawdata),smp.get_fmt());A.after(0,lambda:audio.player.play_start(snd))
+				except Exception as e:A.after(0,lambda:ST.set('Cannot preview: %s'%e))
+			threading.Thread(target=go,daemon=True).start()
+		def stop():
+			try:
+				import audio;audio.player.play_stop()
+			except Exception:pass
+		def build(res):
 			if not W.winfo_exists():return
-			T.configure(state='normal');T.delete('1.0','end')
-			T.insert('end','%-30s %7s %5s %6s  %s\n'%('file','BPM','bars','steps','source'))
-			T.insert('end','-'*66+'\n')
-			for name,bpm,bars,steps,src,dur in res:
-				T.insert('end','%-30s %7s %5s %6s  %s\n'%(name[:30],('%.1f'%bpm)if bpm else '?',bars if bars is not None else '-',steps if steps is not None else '-',src))
-			T.configure(state=_L)
+			for c,txt in enumerate(('Track','Detected','','','Use BPM','')):
+				ttk.Label(BODY,text=txt,font=(FONT_FAMILY,11,_N)).grid(row=0,column=c,padx=6,pady=(0,4),sticky=_A)
+			r=1
+			for name,bpm,bars,steps,src,dur,path in res:
+				stem=_os.path.splitext(name)[0]
+				var=tk.StringVar()
+				pv=A._bpm_overrides.get(stem)
+				var.set(fmt(pv) if pv else (fmt(bpm) if bpm else ''))
+				A._bpm_rows[stem]={'detected':bpm,'var':var,'path':path}
+				ttk.Label(BODY,text=name[:36],width=36,anchor=_A).grid(row=r,column=0,padx=6,pady=2,sticky=_A)
+				ttk.Label(BODY,text=(('%.1f'%bpm)if bpm else '?'),width=10,anchor=_A).grid(row=r,column=1,padx=6,sticky=_A)
+				ttk.Button(BODY,text='x2',width=3,command=lambda s=stem:mul(s,2.0)).grid(row=r,column=2,padx=1)
+				ttk.Button(BODY,text='/2',width=3,command=lambda s=stem:mul(s,0.5)).grid(row=r,column=3,padx=1)
+				sp=tk.Spinbox(BODY,from_=20,to=400,increment=1,width=7,textvariable=var);sp.grid(row=r,column=4,padx=6)
+				for _ev in('<MouseWheel>','<Button-4>','<Button-5>'):sp.bind(_ev,wheel)
+				pb=ttk.Button(BODY,text='▶',width=3,command=lambda p=path:play(p));pb.grid(row=r,column=5,padx=2)
+				if not HAVE_AUDIO:pb.state(['disabled'])
+				r+=1
+			ST.set('%d track(s). Edit Use BPM if needed, then Apply.'%len(res))
+		def apply():
+			n=0
+			for stem,R in A._bpm_rows.items():
+				t=R['var'].get().strip()
+				if t:
+					try:A._bpm_overrides[stem]=float(t);n+=1
+					except ValueError:pass
+				elif stem in A._bpm_overrides:del A._bpm_overrides[stem]
+			A.status_var.set(('BPM set for %d track(s).'%n) if n else 'BPM overrides cleared.');W.destroy()
+		def clearov():
+			A._bpm_overrides.clear()
+			for R in A._bpm_rows.values():R['var'].set('')
+			ST.set('Overrides cleared.')
+		ttk.Button(BT,text='Stop',command=stop).pack(side='left')
+		ttk.Button(BT,text='Clear all',command=clearov).pack(side='left',padx=6)
+		ttk.Button(BT,text='Cancel',command=W.destroy).pack(side='right',padx=(6,0))
+		ttk.Button(BT,text='Apply',command=apply).pack(side='right')
 		def work():
 			try:r=e2s_autoslice.detect_bpms(argv)
-			except Exception as e:r=[('(error)',None,None,None,str(e),0)]
-			A.after(0,lambda:fill(r))
+			except Exception as e:r=[('(error)',_D,_D,_D,str(e),0,'')]
+			A.after(0,lambda:build(r))
 		threading.Thread(target=work,daemon=True).start()
 	def _donate(A):
 		import webbrowser;webbrowser.open('https://www.paypal.com/donate/?business=777paranoia%40gmail.com&currency_code=USD')
@@ -271,6 +341,10 @@ class AutoSliceGUI(_BASE):
 			if not J:raise ValueError('Stem split is on but no stems are selected.')
 			if A.stems_only_var.get():B+=['--stems-only','--stems',','.join(J)]
 			else:B+=['--demucs','--stems',','.join(J)]
+		if getattr(A,'_bpm_overrides',_D):
+			import tempfile;ovd={kk:vv for(kk,vv)in A._bpm_overrides.items()if vv}
+			if ovd:
+				tf=tempfile.NamedTemporaryFile('w',suffix='.json',prefix='oe2s_bpm_',delete=_J);json.dump(ovd,tf);tf.close();B+=['--bpm-map',tf.name]
 		return B
 	def _run(A):
 		try:B=A._build_argv()
@@ -331,7 +405,7 @@ class AutoSliceGUI(_BASE):
 			with open(CONFIG_PATH,_A,encoding=_T)as B:json.dump(A.cfg,B,indent=2)
 		except Exception:pass
 		A.destroy()
-MANUAL=[('h1',_U),(_C,'Batch auto-slicer for Korg electribe sampler (e2s) loops. Point it at WAV files or folders, choose how to slice, and it writes sliced samples ready for the device. All processing is offline; nothing is uploaded.'),(_F,'Quick start'),(_C,'1. Add files or a folder under Inputs (or drag them onto the list).\n2. Pick an Output folder.\n3. Leave Mode on transient and click Slice.\nThe log shows what happened and the equivalent command line.'),(_F,'Modes'),(_C,'transient (default) - place slices on detected hits/beats (spectral-flux onset detection), with a one-16th minimum spacing. Best for most loops.\ngrid - cut the loop into equal divisions (the Steps value).\nhybrid - an equal grid where each step snaps to a nearby hit if one is close; always one slice per step. Use when you want a strict step grid aligned to the groove.'),(_F,'Output format'),(_C,'wav (default) - one WAV per input carrying the Korg slice metadata plus standard smpl/cue chunks. Drag onto the device.\ne2sSample.all - a single bank file holding every processed sample, assigned to slots starting at First slot.\nOutput is capped at the e2s memory limit (26,214,396 bytes); anything that would exceed it is skipped with a note in the log. ("esli" is Korg\'s name for the embedded slice metadata.)'),(_F,_P),(_C,"Any text here is added to the end of every output file name, before .wav. E.g. '_140' turns loop.wav into loop_140.wav."),(_F,'Steps & BPM'),(_C,"Steps is the number of grid divisions/slices (max 64). Leave blank to auto-pick (bars x 16).\nBPM is used to infer bar count. Leave blank to auto-detect: first from the filename if it contains something like '140bpm', otherwise from the loop length assuming a whole number of 4/4 bars. If detection guesses wrong, type the BPM here to force it."),(_F,'Beat & Category'),(_C,"Beat sets the device's step resolution (16, 32, triplet variants). Category is the sample category shown on the electribe (Loop, Kick, Snare, etc.)."),(_F,'Tolerance (hybrid only)'),(_C,'How far a grid point may move to land on a detected hit, as a fraction of one step. 0 = never snap (pure grid). Around 0.35 is a good default.'),(_F,_f),(_C,'Onset detection for transient and hybrid modes, on the electribe firmware 1-15 scale (Sample Edit). 1 keeps only the strongest hits; 15 catches the quietest. Default 8. In transient mode the slice count is still capped to Steps.'),(_F,_g),(_C,"Optional pre-pass: each input is separated into stems (drums/bass/vocals/other) with demucs, then the ticked stems are sliced individually. All four are selected by default. The same Mode, Tolerance and Sensitivity are applied to every stem - there is no per-stem control. Outputs are named '<track>__<stem>.wav'; raw stems are kept in a '_stems' folder. Requires demucs (bundled in the standalone app); first run downloads the model."),(_F,_Y),(_C,'Tools > Chop sliced WAVs (or the Chop tool button) splits an already-sliced WAV into one file per slice, reading the cue/esli markers this app writes. Optional click-free fade applies a short fade in/out to each exported slice so there are no edge clicks.'),(_F,'Options'),(_C,"Set loop points - loop the whole sample on the device (off = one-shot).\nDeactivate silent steps - silent steps left inactive in the step map.\nPer-slice metrics - compute each slice's peak/attack for the metadata.\nForce mono - center-mix stereo inputs to mono.\nVerbose log - print a per-file summary."),(_F,'Log'),(_C,'Copy log / Save log / Clear log manage the output pane. The first line of each run is the exact command-line equivalent.')]
+MANUAL=[('h1',_U),(_C,'Batch auto-slicer for Korg electribe sampler (e2s) loops. Point it at WAV files or folders, choose how to slice, and it writes sliced samples ready for the device. All processing is offline; nothing is uploaded.'),(_F,'Quick start'),(_C,'1. Add files or a folder under Inputs (or drag them onto the list).\n2. Pick an Output folder.\n3. Leave Mode on transient and click Slice.\nThe log shows what happened and the equivalent command line.'),(_F,'Modes'),(_C,'transient (default) - detect hits/beats (spectral-flux onset detection), then lock every slice to the BPM-derived 16th-note grid: the loop is divided into whole 16ths and each hit is quantized to the grid line of the cell it falls in, so every slice is an exact number of 16ths and off-grid notes keep their timing inside their slice. Best for most loops.\ngrid - cut the loop into equal divisions (the Steps value).\nhybrid - an equal grid where each step snaps to a nearby hit if one is close; always one slice per step. Use when you want a strict step grid aligned to the groove.'),(_F,'Output format'),(_C,'wav (default) - one WAV per input carrying the Korg slice metadata plus standard smpl/cue chunks. Drag onto the device.\ne2sSample.all - a single bank file holding every processed sample, assigned to slots starting at First slot.\nOutput is capped at the e2s memory limit (26,214,396 bytes); anything that would exceed it is skipped with a note in the log. ("esli" is Korg\'s name for the embedded slice metadata.)'),(_F,_P),(_C,"Any text here is added to the end of every output file name, before .wav. E.g. '_140' turns loop.wav into loop_140.wav."),(_F,'Steps & BPM'),(_C,"Steps is the number of grid divisions/slices (max 64). Leave blank to auto-pick (bars x 16).\nBPM is used to infer bar count. Leave blank to auto-detect: first from the filename if it contains something like '140bpm', otherwise from the loop length assuming a whole number of 4/4 bars. If detection guesses wrong, type the BPM here to force it."),(_F,'Beat & Category'),(_C,"Beat sets the device's step resolution (16, 32, triplet variants). Category is the sample category shown on the electribe (Loop, Kick, Snare, etc.)."),(_F,'Tolerance (hybrid only)'),(_C,'How far a grid point may move to land on a detected hit, as a fraction of one step. 0 = never snap (pure grid). Around 0.35 is a good default.'),(_F,_f),(_C,'Onset detection for transient and hybrid modes, on the electribe firmware 1-15 scale (Sample Edit). 1 keeps only the strongest hits; 15 catches the quietest. Default 8. In transient mode the slice count is still capped to Steps.'),(_F,_g),(_C,"Optional pre-pass: each input is separated into stems (drums/bass/vocals/other) with demucs, then the ticked stems are sliced individually. All four are selected by default. The same Mode, Tolerance and Sensitivity are applied to every stem - there is no per-stem control. Outputs are named '<track>__<stem>.wav'; raw stems are kept in a '_stems' folder. Requires demucs (bundled in the standalone app); first run downloads the model."),(_F,_Y),(_C,'Tools > Chop sliced WAVs (or the Chop tool button) splits an already-sliced WAV into one file per slice, reading the cue/esli markers this app writes. Optional click-free fade applies a short fade in/out to each exported slice so there are no edge clicks.'),(_F,'Options'),(_C,"Set loop points - loop the whole sample on the device (off = one-shot).\nDeactivate silent steps - silent steps left inactive in the step map.\nPer-slice metrics - compute each slice's peak/attack for the metadata.\nForce mono - center-mix stereo inputs to mono.\nVerbose log - print a per-file summary."),(_F,'Log'),(_C,'Copy log / Save log / Clear log manage the output pane. The first line of each run is the exact command-line equivalent.')]
 def _quote(a):return'"%s"'%a if' 'in a else a
 def main():os.chdir(os.path.dirname(os.path.abspath(__file__)));A=AutoSliceGUI();A.mainloop()
 if __name__=='__main__':main()

@@ -493,7 +493,7 @@ class MaxValueEntry(tk.Entry):
         self.MVEmax = max
         self.MVEvar = kwarg.get('textvariable')
         if self.MVEvar:
-            self.MVEvar_trace = self.MVEvar.trace('w', self._var_set)
+            self.MVEvar_trace = self.MVEvar.trace_add('write', self._var_set)
         super().__init__(parent, *arg, **kwarg)
         self.defaultbg =  self.cget('disabledbackground')
 
@@ -501,11 +501,11 @@ class MaxValueEntry(tk.Entry):
         var = kwarg.get('textvariable')
         if var:
             if self.MVEvar:
-                self.MVEvar.trace_vdelete('w', self.MVEvar_trace)
+                self.MVEvar.trace_remove('write', self.MVEvar_trace)
             self.MVEvar=var
         super().config(*arg, **kwarg)
         if var:
-            self.MVEvar_trace = self.MVEvar.trace('w', self._var_set)
+            self.MVEvar_trace = self.MVEvar.trace_add('write', self._var_set)
 
     def _var_set(self, *args):
         val = self.MVEvar.get()
@@ -536,8 +536,8 @@ class SampleNumSpinbox(ROSpinbox):
 
         if self.SNSvar:
             self._safeSet=False
-            self.SNSvar_trace = self.SNSvar.trace('w', self._var_set)
-            self.SNSvarString_trace = self.SNSvarString.trace('w', self._varString_set)
+            self.SNSvar_trace = self.SNSvar.trace_add('write', self._var_set)
+            self.SNSvarString_trace = self.SNSvarString.trace_add('write', self._varString_set)
 
     def config(self, *arg, **kwarg):
         command=kwarg.get('command')
@@ -546,8 +546,8 @@ class SampleNumSpinbox(ROSpinbox):
         var=kwarg.get('textvariable','')
         if var != '':
             if self.SNSvar:
-                self.SNSvar.trace_vdelete('w', self.SNSvar_trace)
-                self.SNSvarString.trace_vdelete('w', self.SNSvarString_trace)
+                self.SNSvar.trace_remove('write', self.SNSvar_trace)
+                self.SNSvarString.trace_remove('write', self.SNSvarString_trace)
             self.SNSvar=var
             if var:
                 self.SNSvarString=tk.StringVar()
@@ -556,8 +556,8 @@ class SampleNumSpinbox(ROSpinbox):
         super().config(*arg, **kwarg)
         if var:
             self._safeSet=False
-            self.SNSvar_trace = self.SNSvar.trace('w', self._var_set)
-            self.SNSvarString_trace = self.SNSvarString.trace('w', self._varString_set)
+            self.SNSvar_trace = self.SNSvar.trace_add('write', self._var_set)
+            self.SNSvarString_trace = self.SNSvarString.trace_add('write', self._varString_set)
 
     def _var_set(self, *args):
         if not self._safeSet:
@@ -653,13 +653,13 @@ class Slice:
 
     def set_sample(self, fmt, data, esli):
         if self.startTrace:
-            self.start.trace_vdelete('w', self.startTrace)
+            self.start.trace_remove('write', self.startTrace)
         if self.stopTrace:
-            self.stop.trace_vdelete('w', self.stopTrace)
+            self.stop.trace_remove('write', self.stopTrace)
         if self.attackTrace:
-            self.attack.trace_vdelete('w', self.attackTrace)
+            self.attack.trace_remove('write', self.attackTrace)
         if self.amplitudeTrace:
-            self.amplitude.trace_vdelete('w', self.amplitudeTrace)
+            self.amplitude.trace_remove('write', self.amplitudeTrace)
 
         self.fmt = fmt
         self.data = data.rawdata
@@ -688,10 +688,10 @@ class Slice:
         self.lineSet.attack_last = CVar(self.attack,-1,self.sample_length-1)
         self.lineSet.amplitude = CVar(self.amplitude,0,65536)
 
-        self.startTrace = self.start.trace('w', self._start_set)
-        self.stopTrace = self.stop.trace('w', self._stop_set)
-        self.attackTrace = self.attack.trace('w', self._attack_set)
-        self.amplitudeTrace = self.amplitude.trace('w', self._amplitude_set)
+        self.startTrace = self.start.trace_add('write', self._start_set)
+        self.stopTrace = self.stop.trace_add('write', self._stop_set)
+        self.attackTrace = self.attack.trace_add('write', self._attack_set)
+        self.amplitudeTrace = self.amplitude.trace_add('write', self._amplitude_set)
 
         self._selected=False
 
@@ -892,13 +892,13 @@ class NormalSampleOptions(tk.LabelFrame):
         self.oneshot = esli.OSC_OneShot
 
         if self.start_trace:
-            self.start.trace_vdelete('w', self.start_trace)
+            self.start.trace_remove('write', self.start_trace)
         if self.stop_trace:
-            self.stop.trace_vdelete('w', self.stop_trace)
+            self.stop.trace_remove('write', self.stop_trace)
         if self.loopStart_trace:
-            self.loopStart.trace_vdelete('w', self.loopStart_trace)
+            self.loopStart.trace_remove('write', self.loopStart_trace)
         if self.playVolume_trace:
-            self.playVolume.trace_vdelete('w', self.playVolume_trace)
+            self.playVolume.trace_remove('write', self.playVolume_trace)
 
         start=esli.OSC_StartPoint_address//self.blockAlign
         stop=start+esli.OSC_EndPoint_offset//self.blockAlign
@@ -914,10 +914,10 @@ class NormalSampleOptions(tk.LabelFrame):
         self.loopStart.set(loopStart)
         self.playVolume.set(playVolume)
         
-        self.start_trace = self.start.trace('w', self._start_set)
-        self.stop_trace = self.stop.trace('w', self._stop_set)
-        self.loopStart_trace = self.loopStart.trace('w', self._loopStart_set)
-        self.playVolume_trace = self.playVolume.trace('w', self._playVolume_set)
+        self.start_trace = self.start.trace_add('write', self._start_set)
+        self.stop_trace = self.stop.trace_add('write', self._stop_set)
+        self.loopStart_trace = self.loopStart.trace_add('write', self._loopStart_set)
+        self.playVolume_trace = self.playVolume.trace_add('write', self._playVolume_set)
         
         self.lineSet.first = CVar(self.start,0,self.sample_length-1)
         self.lineSet.last = CVar(self.stop,0,self.sample_length-1)
@@ -1056,7 +1056,7 @@ class SliceEditor(tk.PanedWindow):
         framezoom.pack(fill=tk.X, expand=tk.NO)
         tk.Label(framezoom,text="Zoom:").pack(side=tk.LEFT)
         self.zoomVar=tk.StringVar()
-        self.zoomVar.trace("w",self._zoom_edit)
+        self.zoomVar.trace_add('write',self._zoom_edit)
         self.zoomEdit = ROSpinbox(framezoom, values=('all',), textvariable=self.zoomVar)
         self.zoomEdit.pack(side=tk.LEFT)
         frameWave.update_idletasks()
@@ -1186,26 +1186,26 @@ class SliceEditor(tk.PanedWindow):
         self.slicedSampleOptions.set_sample(fmt, data, esli)
         
         if self.numActiveStepsTrace:
-            self.numActiveSteps.trace_vdelete('w', self.numActiveStepsTrace)
+            self.numActiveSteps.trace_remove('write', self.numActiveStepsTrace)
 
         for j in range(64):
             if self.activeStepsTrace[j]:
-                self.activeSteps[j].trace_vdelete('w', self.activeStepsTrace[j])
+                self.activeSteps[j].trace_remove('write', self.activeStepsTrace[j])
             self.activeSteps[j].set(str(esli.sliceSteps[j]) if esli.sliceSteps[j] >= 0 else "Off")
-            self.activeStepsTrace[j] =  self.activeSteps[j].trace('w', lambda *args, j=j: self._activeStepEdit(j))
+            self.activeStepsTrace[j] =  self.activeSteps[j].trace_add('write', lambda *args, j=j: self._activeStepEdit(j))
 
         if self.numStepsTrace:
-            self.numSteps.trace_vdelete('w', self.numStepsTrace)
+            self.numSteps.trace_remove('write', self.numStepsTrace)
         self.numSteps.set(esli.slicingNumSteps)
-        self.numStepsTrace = self.numSteps.trace('w', self._numStepsEdit)
+        self.numStepsTrace = self.numSteps.trace_add('write', self._numStepsEdit)
                 
         if self.beatTrace:
-            self.beat.trace_vdelete('w', self.beatTrace)
+            self.beat.trace_remove('write', self.beatTrace)
         self.beat.set(e2s.esli_beat_to_str.get(esli.slicingBeat))
-        self.beatTrace = self.beat.trace('w', self._beatEdit)
+        self.beatTrace = self.beat.trace_add('write', self._beatEdit)
 
         self.numActiveSteps.set(esli.slicesNumActiveSteps)
-        self.numActiveStepsTrace = self.numActiveSteps.trace('w', self._numActiveStepsChanged)
+        self.numActiveStepsTrace = self.numActiveSteps.trace_add('write', self._numActiveStepsChanged)
         
         self.slicedRadioV.set(self.numActiveSteps.get()>0)
 
@@ -1415,16 +1415,16 @@ class Sample(object):
 
     def reset_vars(self):
         if self.name_trace:
-            self.name.trace_vdelete('w', self.name_trace)
+            self.name.trace_remove('write', self.name_trace)
         if self.oscNum_trace:
-            self.oscNum.trace_vdelete('w', self.oscNum_trace)
+            self.oscNum.trace_remove('write', self.oscNum_trace)
         self.entryOscNum.config(textvariable=None)
         if self.oneShot_trace:
-            self.oneShot.trace_vdelete('w', self.oneShot_trace)
+            self.oneShot.trace_remove('write', self.oneShot_trace)
         if self.plus12dB_trace:
-            self.plus12dB.trace_vdelete('w', self.plus12dB_trace)
+            self.plus12dB.trace_remove('write', self.plus12dB_trace)
         if self.tuneVal_trace:
-            self.tuneVal.trace_vdelete('w', self.tuneVal_trace)
+            self.tuneVal.trace_remove('write', self.tuneVal_trace)
 
         esli = self.e2s_sample.get_esli()
         fmt = self.e2s_sample.get_fmt()
@@ -1447,11 +1447,11 @@ class Sample(object):
         self.stereo.set(fmt.channels > 1)
         self.smpSize.set(len(data))
 
-        self.name_trace = self.name.trace('w', self._name_set)
-        self.oscNum_trace = self.oscNum.trace('w', self._oscNum_set)
-        self.oneShot_trace = self.oneShot.trace('w', self._oneShot_set)
-        self.plus12dB_trace = self.plus12dB.trace('w', self._plus12dB_set)
-        self.tuneVal_trace = self.tuneVal.trace('w', self._tuneVal_set)
+        self.name_trace = self.name.trace_add('write', self._name_set)
+        self.oscNum_trace = self.oscNum.trace_add('write', self._oscNum_set)
+        self.oneShot_trace = self.oneShot.trace_add('write', self._oneShot_set)
+        self.plus12dB_trace = self.plus12dB.trace_add('write', self._plus12dB_set)
+        self.tuneVal_trace = self.tuneVal.trace_add('write', self._tuneVal_set)
         self.entryOscNum.config(textvariable=self.oscNum)
     
     def _name_set(self, *args):
@@ -2268,7 +2268,7 @@ class SampleAllEditor(tk.Frame):
             "Cannot use this file:\n{}\n"
             "The file is probably corrupted or you found a bug.\n"
             "See log file for details.\n"
-            "Error message:\{}.".format(filename, e)
+            "Error message:{}.".format(filename, e)
             )
             # also report it in log file
             print(e)

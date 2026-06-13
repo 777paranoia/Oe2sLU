@@ -22,6 +22,7 @@ Formats:
 """
 
 import argparse
+import json
 import math
 import os
 import struct
@@ -92,15 +93,28 @@ def resolve_bpm_steps(args, filename, x, sr):
     source = 'flag'
     bars = None
     if bpm is None:
+        # per-file manual override (from the Set-BPM window) wins over auto
+        # detection - keyed by the file's stem (name without extension).
+        ov = getattr(args, 'bpm_overrides', None)
+        if ov:
+            stem = os.path.splitext(os.path.basename(filename))[0]
+            if stem in ov and ov[stem]:
+                bpm = float(ov[stem])
+                source = 'override'
+    if bpm is None:
         bpm = se.bpm_from_name(os.path.basename(filename))
         source = 'filename'
     if bpm is None:
-        # primary: detect tempo from the audio, snapped to a bar-exact value
-        bpm, bars = se.bpm_from_audio(num_frames, sr, x)
-        source = 'audio'
-    if bpm is None:
+        # PRIMARY: a loop is almost always a whole/half number of bars, so its
+        # length pins the bar count exactly -> exact, bar-locked BPM. No tempo
+        # guessing needed; this is what keeps the 16th grid tiling perfectly.
         bpm, bars = se.bpm_from_length(num_frames, sr)
         source = 'length'
+    if bpm is None:
+        # fallback only: onset-autocorrelation estimate, used when the length is
+        # ambiguous (no bar count lands in range).
+        bpm, bars = se.bpm_from_audio(num_frames, sr, x)
+        source = 'audio'
     if bpm is not None and bars is None:
         bars = max(1, int(round(num_frames / sr * bpm / 240.0)))
 
@@ -108,10 +122,12 @@ def resolve_bpm_steps(args, filename, x, sr):
     steps = args.steps
     if steps is None:
         if bars is not None:
-            steps = min(MAX_SLICES, bars * spb)
+            # bars may be fractional (e.g. 0.5 for a half-bar loop); the grid is
+            # always a whole number of 16th steps.
+            steps = int(round(bars * spb))
         else:
             steps = spb
-    steps = max(1, min(MAX_SLICES, steps))
+    steps = max(1, min(MAX_SLICES, int(steps)))
     return bpm, steps, bars, source
 
 
@@ -127,30 +143,68 @@ def grid_unit_frames(args, bpm, x, steps, sr):
 
 
 def compute_slices(x, sr, args, steps, bpm=None):
-    """Returns (starts, active) in frames."""
+    """Returns (starts, active, eff_steps) in frames.
+
+    eff_steps is the number of grid steps the slices were actually cut on -
+    the device's step map MUST use this same value so every slice begins on a
+    step boundary and no slice is shorter than one step. For grid/hybrid this
+    equals `steps`; for transient it is the (clamped) 16th-note cell count.
+    """
     if args.mode == 'grid':
         starts = se.grid_slices(len(x), steps)
         active = se.slice_activity(x, starts)
+        eff_steps = steps
     elif args.mode == 'transient':
-        # Minimum slice = one grid unit (a 16th at the detected BPM). Detect
-        # onsets, then enforce that spacing so no slice is ever shorter than a
-        # 16th - independent of whether the loop is an exact bar count.
+        # Grid-locked transient slicing:
+        #   1. BPM (resolved by the caller) defines one grid unit (a 16th at
+        #      the Beat setting's resolution).
+        #   2. The unit count is clamped to the TOTAL length - the loop is
+        #      divided into `total` equal cells so the grid always tiles the
+        #      file exactly, bar-exact or not.
+        #   3. Every detected onset is quantized to the grid line of the cell
+        #      it falls in. Slice starts therefore sit ON the grid and every
+        #      slice length is a whole number of 16ths. A note that plays
+        #      off-grid keeps its real position *inside* its slice, so the
+        #      step map can never trigger it before it actually occurs.
         unit = grid_unit_frames(args, bpm, x, steps, sr)
-        onsets = se.detect_onsets(x, sr, sensitivity=args.sensitivity,
-                                  min_sep_s=max(0.005, unit / sr))
-        starts = [0]
-        for o in sorted(int(v) for v in onsets):
-            if o - starts[-1] >= unit:
-                starts.append(o)
-        starts = np.array(starts[:max(1, steps)], dtype=int)
+        total = max(1, int(round(len(x) / unit)))
+        # The device has only MAX_SLICES steps. If the 16th-note grid would have
+        # more cells than that, coarsen the grid (fewer, larger cells) so it
+        # still tiles the whole loop. This is what guarantees the slice grid and
+        # the step grid are identical - without it, slices get cut finer than a
+        # step and several collide into one step in the map.
+        total = max(1, min(total, MAX_SLICES))
+        cell = len(x) / float(total)
+        onsets = se.detect_onsets(x, sr, sensitivity=args.sensitivity)
+        cells = {0}
+        for o in onsets:
+            # snap each transient to the NEAREST grid line (16th step). Onset
+            # detection can fire a hair early or late, so nearest-rounding keeps
+            # the boundary on the intended step instead of slipping a cell.
+            cells.add(min(total - 1, max(0, int(round(o / cell)))))
+        # at most one slice per cell, and never more than the grid has
+        cap = max(1, min(MAX_SLICES, total))
+        if len(cells) > cap:
+            # over the slice budget: keep the strongest hits (cell 0 always)
+            win = max(1, int(0.05 * sr))
+            def _peak(c):
+                a = int(c * cell)
+                return float(np.max(np.abs(x[a:a + win]), initial=0.0))
+            keep = sorted((c for c in cells if c), key=_peak,
+                          reverse=True)[:cap - 1]
+            cells = {0} | set(keep)
+        starts = np.array([int(math.floor(c * cell)) for c in sorted(cells)],
+                          dtype=int)
         active = se.slice_activity(x, starts)
+        eff_steps = total
     else:  # hybrid
         starts, active = se.hybrid_slices(
             x, sr, steps, tolerance=args.tolerance,
             sensitivity=args.sensitivity)
+        eff_steps = steps
     if not args.drop_silent:
         active = np.ones(len(starts), dtype=bool)
-    return starts.astype(int), active
+    return starts.astype(int), active, eff_steps
 
 
 def fill_esli(sample, starts, active, args, steps):
@@ -199,12 +253,21 @@ def fill_esli(sample, starts, active, args, steps):
     # already sit on the grid, so this maps slice i -> step i as before.)
     for i in range(MAX_SLICES):
         esli.sliceSteps[i] = -1
-    step_frames = num_frames / float(steps) if steps else float(num_frames)
+    steps = max(1, min(MAX_SLICES, int(steps)))
+    step_frames = num_frames / float(steps)
     for idx, start in enumerate(starts):
         if not active[idx]:
             continue
-        step = int(round(start / step_frames)) if step_frames else 0
+        step = int(round(start / step_frames))
         step = max(0, min(steps - 1, step))
+        # Two slices must never land on the same step - that would mean a slice
+        # shorter than one step division. If it happens (e.g. rounding at the
+        # grid edge), push this slice to the next free step so it is never
+        # dropped, keeping one slice per step.
+        while step < steps and esli.sliceSteps[step] != -1:
+            step += 1
+        if step >= steps:
+            break
         esli.sliceSteps[step] = idx
     num_active = sum(1 for i in range(MAX_SLICES) if esli.sliceSteps[i] != -1)
     esli.slicingNumSteps = steps
@@ -269,6 +332,9 @@ def build_parser():
                     help='number of grid steps/slices (default: bars x 16, max 64)')
     ap.add_argument('--bpm', type=float, default=None,
                     help='force BPM (default: filename hint, then loop-length inference)')
+    ap.add_argument('--bpm-map', default=None, dest='bpm_map',
+                    help='path to a JSON file of {"filestem": bpm} per-file BPM '
+                         'overrides (used by the Set-BPM window)')
     ap.add_argument('--beat', choices=tuple(e2s.esli_beat), default='16')
     ap.add_argument('--tolerance', type=float, default=0.35,
                     help='hybrid: max snap distance as fraction of a step (default 0.15)')
@@ -305,11 +371,26 @@ def build_parser():
     return ap
 
 
+def _load_bpm_map(path):
+    """Read a {stem: bpm} JSON override file. Returns {} on any problem so a
+    bad/missing map never blocks slicing."""
+    if not path:
+        return {}
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+        return {str(k): float(v) for k, v in raw.items() if v}
+    except Exception:
+        return {}
+
+
 def detect_bpms(argv=None):
     """Detect BPM/bars/steps for each input WITHOUT slicing (pre-flight check).
-    Returns a list of (name, bpm, bars, steps, source, duration_seconds), using
-    the exact same detection the slicer would use for the given options."""
+    Returns a list of (name, bpm, bars, steps, source, duration_seconds, path),
+    using the exact same detection the slicer would use for the given options.
+    `path` is the actual (possibly format-converted) WAV, for audio preview."""
     args = build_parser().parse_args(argv)
+    args.bpm_overrides = _load_bpm_map(getattr(args, 'bpm_map', None))
     files = convert_inputs(gather_inputs(args.inputs))
     from e2s_sample_import import from_wav, ImportOptions
     out = []
@@ -324,14 +405,15 @@ def detect_bpms(argv=None):
             sr = fmt.samplesPerSec
             x = to_mono_float(sample)
             bpm, steps, bars, src = resolve_bpm_steps(args, p, x, sr)
-            out.append((name, bpm, bars, steps, src, len(x) / float(sr)))
+            out.append((name, bpm, bars, steps, src, len(x) / float(sr), p))
         except Exception as e:
-            out.append((name, None, None, None, 'error: %s' % e, 0.0))
+            out.append((name, None, None, None, 'error: %s' % e, 0.0, p))
     return out
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    args.bpm_overrides = _load_bpm_map(getattr(args, 'bpm_map', None))
     if not args.output:
         print('error: -o/--output is required', file=sys.stderr)
         return 2
@@ -420,11 +502,12 @@ def main(argv=None):
         sr = fmt.samplesPerSec
         x = to_mono_float(sample)
         bpm, steps, bars, src = resolve_bpm_steps(args, path, x, sr)
-        starts, active = compute_slices(x, sr, args, steps, bpm)
+        starts, active, eff_steps = compute_slices(x, sr, args, steps, bpm)
         if len(starts) > MAX_SLICES:
             starts, active = starts[:MAX_SLICES], active[:MAX_SLICES]
 
-        fill_esli(sample, starts, active, args, steps)
+        # use the grid the slices were actually cut on for the step map
+        fill_esli(sample, starts, active, args, eff_steps)
         esli = sample.get_esli()
         out_name = name + args.suffix
         esli.OSC_name = bytes(out_name[:16], 'ascii', 'ignore')

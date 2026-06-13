@@ -142,11 +142,27 @@ def bpm_from_length(num_frames, sr, lo=68.0, hi=190.0):
     """
     dur = num_frames / float(sr)
     best = None
-    for bars in (1, 2, 4, 8, 16, 32, 3, 6, 12, 24):
+
+    def _natural(b):
+        # how common a loop length is: powers of two (and the half bar) dominate,
+        # then plain whole-bar counts, then odd fractionals like 1.5.
+        if b in (0.5, 1, 2, 4, 8, 16, 32):
+            return 0
+        if float(b).is_integer():
+            return 1
+        return 2
+
+    center = 118.0   # octave-disambiguation prior (typical loop tempo)
+    # whole and half bar counts - loops are nearly always one of these lengths
+    for bars in (1, 2, 4, 8, 16, 32, 3, 6, 12, 24, 0.5, 1.5):
         bpm = 240.0 * bars / dur
         if lo <= bpm < hi:
-            # prefer near-integer BPM, then fewer bars
-            score = (abs(bpm - round(bpm)), bars)
+            # 1) near-integer BPM, 2) the more common bar length, 3) octave
+            # tie-break toward a typical tempo, 4) fewer bars.
+            score = (round(abs(bpm - round(bpm)), 3),
+                     _natural(bars),
+                     abs(math.log2(bpm / center)),
+                     bars)
             if best is None or score < best[0]:
                 best = (score, bpm, bars)
     if best:
